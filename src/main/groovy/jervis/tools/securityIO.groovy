@@ -1,5 +1,6 @@
 package jervis.tools
 
+import java.security.MessageDigest
 import jervis.exceptions.JervisException
 
 /**
@@ -23,18 +24,24 @@ println security.rsaDecrypt(s)</tt></pre>
 class securityIO {
 
     /**
-      Path to the RSA private key.  This will be used by encryptiong and decryption.
+      Path to the RSA private key.  This will be used by encryption and decryption.
       During key generation it is the location where the private key will be written.
       Default: <tt>/tmp/id_rsa.pem</tt>
      */
     public String id_rsa_priv
 
     /**
-      Path to the RSA public key.  This will be used by encryptiong and decryption.
+      Path to the RSA public key.  This will be used by encryption and decryption.
       During key generation it is the location where the public key will be written.
       Default: <tt>/tmp/id_rsa.pub.pem</tt>
      */
     public String id_rsa_pub
+
+    /**
+      Path to the directory containing fingerprinted RSA keys.
+      Default: <tt>/tmp/</tt>
+     */
+    public String secrets_directory = '/tmp/'
 
     /**
       The key size in which RSA keys will be generated.  It is highly recommended this be <tt>1024</tt> bits or higher in powers of two.
@@ -47,6 +54,10 @@ class securityIO {
       Default: <tt>1024</tt>
      */
     public static int default_key_size = 1024
+
+    void setSecrets_directory(String path) {
+        this.secrets_directory = (path[-1] == '/')? path : path + '/'
+    }
 
     /**
       Instantiates default values for <tt>{@link #id_rsa_priv}</tt>, <tt>{@link #id_rsa_pub}</tt>, and <tt>{@link #id_rsa_keysize}</tt>.
@@ -73,6 +84,7 @@ id_rsa_pub = checkPath(path) + '/id_rsa.pub.pem'
 id_rsa_keysize = {@link #default_key_size}</tt></pre>
      */
     def securityIO(String path) {
+        this.setSecrets_directory(path)
         set_vars(checkPath(path) + '/id_rsa.pem', checkPath(path) + '/id_rsa.pub.pem', default_key_size)
     }
 
@@ -260,5 +272,37 @@ openssl rsa -in /tmp/id_rsa -pubout -outform pem -out /tmp/id_rsa.pub</tt></pre>
         else {
             return stdout.toString().trim()
         }
+    }
+
+    /**
+      Uses RSA asymetric encryption to decrypt a cipher text <tt>String</tt> and outputs plain text.  It is using a fingerprinted key based on the <tt>{@link #secrets_directory}</tt> path.
+
+      For third party reference, this is essentially executing the following commands in a terminal.
+
+<pre><tt>echo 'ciphertext' | base64 -d | openssl rsautl -decrypt -inkey /tmp/id_rsa</tt></pre>
+
+      @param  ciphertext A Base64 encoded cipher text <tt>String</tt> to be decrypted.
+      @return A plain text <tt>String</tt> or more generically: <tt>plaintext = RSAPrivateKeyDecrypt(base64decode(ciphertext))</tt>
+     */
+    public String rsaDecrypt(String fingerprint, String ciphertext) throws JervisException {
+        def stdout = new StringBuilder()
+        def stderr = new StringBuilder()
+        def proc1 = ['echo', '-n', ciphertext.trim()].execute()
+        def proc2 = ['base64','-d'].execute()
+        def proc3 = ['openssl', 'rsautl', '-decrypt', '-inkey', secrets_directory + fingerprint].execute()
+        proc1 | proc2 | proc3
+        proc3.waitForProcessOutput(stdout, stderr)
+        if(proc3.exitValue()) {
+            throw new JervisException(stderr.toString())
+        }
+        else {
+            return stdout.toString().trim()
+        }
+    }
+
+    public String fingerprint(String publicKey) {
+        MessageDigest messageDigest = MessageDigest.getInstance("SHA1")
+        messageDigest.update(publicKey.getBytes())
+        return (new BigInteger(1, messageDigest.digest()).toString(16).padLeft( 40, '0' ))[0..7]
     }
 }
